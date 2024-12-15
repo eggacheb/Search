@@ -6,16 +6,109 @@ import requests
 from bs4 import BeautifulSoup
 from utils import get_page_content
 import charset_normalizer
+import re
+
+def process_search_query(query):
+    """
+    处理搜索查询，识别并应用高级搜索技巧。
+    """
+    # 提取精确匹配的短语（使用双引号）
+    exact_phrases = re.findall(r'"([^"]+)"', query)
+    
+    # 提取排除关键词（使用减号）
+    exclude_terms = re.findall(r'-(\w+)', query)
+    
+    # 提取站内搜索（site:）
+    site_search = re.findall(r'site:(\S+)', query)
+    
+    # 提取文件类型搜索（filetype:）
+    filetype = re.findall(r'filetype:(\w+)', query)
+    
+    # 提取数值范围搜索（使用..）
+    ranges = re.findall(r'(\d+)\.\.(\d+)', query)
+    
+    # 提取定义查询（define:）
+    define_terms = re.findall(r'define:(\w+)', query)
+    
+    # 提取相关搜索（related:）
+    related_sites = re.findall(r'related:(\S+)', query)
+    
+    # 提取标题搜索（intitle:）
+    title_terms = re.findall(r'intitle:(\S+)', query)
+    
+    # 提取URL搜索（inurl:）
+    url_terms = re.findall(r'inurl:(\S+)', query)
+    
+    # 提取时间限制
+    time_limits = re.findall(r'time:(last\d+\w+)', query)
+    
+    return {
+        'exact_phrases': exact_phrases,
+        'exclude_terms': exclude_terms,
+        'site_search': site_search,
+        'filetype': filetype,
+        'ranges': ranges,
+        'define_terms': define_terms,
+        'related_sites': related_sites,
+        'title_terms': title_terms,
+        'url_terms': url_terms,
+        'time_limits': time_limits
+    }
+
+def build_advanced_query(query, engine='Google'):
+    """
+    根据搜索引擎构建高级搜索查询。
+    """
+    search_params = process_search_query(query)
+    advanced_query = query
+
+    if engine == 'Google':
+        # 添加精确匹配
+        for phrase in search_params['exact_phrases']:
+            advanced_query = advanced_query.replace(f'"{phrase}"', f'"{phrase}"')
+        
+        # 添加排除词
+        for term in search_params['exclude_terms']:
+            advanced_query = advanced_query.replace(f'-{term}', f'-{term}')
+        
+        # 添加站内搜索
+        if search_params['site_search']:
+            advanced_query += f" site:{search_params['site_search'][0]}"
+        
+        # 添加文件类型
+        if search_params['filetype']:
+            advanced_query += f" filetype:{search_params['filetype'][0]}"
+            
+    elif engine == 'Bing':
+        # Bing特定的查询构建逻辑
+        for phrase in search_params['exact_phrases']:
+            advanced_query = advanced_query.replace(f'"{phrase}"', f'"{phrase}"')
+            
+        if search_params['time_limits']:
+            advanced_query += f" time:{search_params['time_limits'][0]}"
+            
+    elif engine == '百度':
+        # 百度特定的查询构建逻辑
+        for phrase in search_params['exact_phrases']:
+            advanced_query = advanced_query.replace(f'"{phrase}"', f'"{phrase}"')
+            
+        if search_params['site_search']:
+            advanced_query += f" site:{search_params['site_search'][0]}"
+
+    return advanced_query
 
 def get_google_search_results(query, num_results=5):
     """
-    获取Google搜索结果，优先返回360天气网的结果。
+    获取Google搜索结果，支持高级搜索语法。
     """
+    # 处理高级搜索查询
+    advanced_query = build_advanced_query(query, 'Google')
+    query_encoded = urllib.parse.quote_plus(advanced_query)
+    
     # 如果是天气查询,优先搜索360天气网
     if "天气" in query:
-        query = f"site:tianqi.so.com {query}"
+        query_encoded = urllib.parse.quote_plus(f"site:tianqi.so.com {query}")
     
-    query_encoded = urllib.parse.quote_plus(query)
     url = f"https://www.google.com/search?q={query_encoded}&num={num_results}"
 
     headers = {
@@ -75,7 +168,7 @@ def get_google_search_results(query, num_results=5):
         if len(results) >= num_results:
             break
 
-    # 如果是气查询,只返回360天气网的结果
+    # 如果是天气查询,只返回360天气网的结果
     if "天气" in query:
         results = [r for r in results if 'tianqi.so.com' in r['link']]
         if results:
@@ -101,9 +194,12 @@ def get_google_search_results(query, num_results=5):
 
 def get_bing_search_results(query, num_results=5):
     """
-    获取Bing搜索结果，并爬取每个结果页面的内容。
+    获取Bing搜索结果，支持高级搜索语法。
     """
-    query_encoded = urllib.parse.quote_plus(query)
+    # 处理高级搜索查询
+    advanced_query = build_advanced_query(query, 'Bing')
+    query_encoded = urllib.parse.quote_plus(advanced_query)
+    
     url = f"https://www.bing.com/search?q={query_encoded}&count={num_results}"
 
     headers = {
@@ -173,9 +269,12 @@ def get_bing_search_results(query, num_results=5):
 
 def get_baidu_search_results(query, num_results=5):
     """
-    获取百度搜索结果，并爬取每个结果页面的内容。
+    获取百度搜索结果，支持高级搜索语法。
     """
-    query_encoded = urllib.parse.quote_plus(query)
+    # 处理高级搜索查询
+    advanced_query = build_advanced_query(query, '百度')
+    query_encoded = urllib.parse.quote_plus(advanced_query)
+    
     url = f"https://www.baidu.com/s?wd={query_encoded}&rn={num_results}&ie=utf-8"
 
     headers = {
