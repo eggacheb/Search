@@ -3,7 +3,7 @@
 这是一个强大的搜索API服务，支持从多个搜索引擎获取信息。它是从OnlineGPT桌面应用改造而来的Web API服务，专门设计用于与GPT等大型语言模型集成。
 
 
-## 改自
+## 改的下面这个项目
 
 https://github.com/yeahhe365/OnlineGPT
 
