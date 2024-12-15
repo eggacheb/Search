@@ -2,6 +2,11 @@
 
 这是一个强大的搜索API服务，支持从多个搜索引擎获取信息。它是从OnlineGPT桌面应用改造而来的Web API服务，专门设计用于与GPT等大型语言模型集成。
 
+
+## 改自
+
+https://github.com/yeahhe365/OnlineGPT
+
 ## 功能特点
 
 - 支持多个搜索引擎 (Google、Bing、百度)
@@ -114,6 +119,7 @@ curl -X POST "https://your-api-url.vercel.app/search" \
 3. 在生产环境中请设置适当的CORS策略
 4. 建议添加缓存机制以提高性能
 5. 注意处理并发请求
+
 
 ## 许可证
 
