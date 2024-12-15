@@ -7,35 +7,32 @@ import charset_normalizer
 
 def clean_text(text):
     """
-    清洗文本，移除控制字符和非打印字符。
+    清洗文本，保留有意义的格式。
     """
+    if not text:
+        return ""
+        
     # 移除控制字符
     text = re.sub(r'[\x00-\x1F\x7F]', '', text)
-    # 规范化空白字符
+    
+    # 统一空白字符
     text = re.sub(r'\s+', ' ', text)
+    
+    # 清理多余的换行
+    text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+    
+    # 清理HTML实体
+    text = re.sub(r'&[a-zA-Z]+;', ' ', text)
+    
+    # 清理特殊Unicode字符
+    text = re.sub(r'[\u200b-\u200f\u2028-\u202f\u205f-\u206f]', '', text)
+    
     return text.strip()
 
-def remove_duplicates(text_list, min_length=10):
+def get_page_content(url):
     """
-    移除文本列表中的重复内容和过短的内容。
-    """
-    seen = set()
-    result = []
-    for text in text_list:
-        # 跳过过短的内容
-        if len(text) < min_length:
-            continue
-        # 跳过重复内容
-        if text in seen:
-            continue
-        seen.add(text)
-        result.append(text)
-    return result
-
-def get_page_content(url, max_length=1000):
-    """
-    获取指定URL页面的所有文本内容，处理编码并过滤非HTML内容。
-    限制返回内容的最大长度。
+    获取指定URL页面的核心内容，处理编码并保留重要的文本格式。
+    智能提取主要内容区域，过滤无关内容。
     """
     headers = {
         "User-Agent": (
@@ -50,94 +47,103 @@ def get_page_content(url, max_length=1000):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
 
+        # 检查内容类型
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' not in content_type and 'application/xhtml+xml' not in content_type:
+            return "非HTML内容，无法提取"
+
         # 检测编码
         detected = charset_normalizer.from_bytes(response.content).best()
         encoding = detected.encoding if detected and detected.encoding else 'utf-8'
         text = response.content.decode(encoding, errors='replace')
 
+        # 使用Beautiful Soup解析HTML
         soup = BeautifulSoup(text, 'html.parser')
 
-        # 移除不需要的标签
-        for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'header', 'footer', 'nav']):
+        # 移除干扰元素
+        noise_tags = [
+            'script', 'style', 'meta', 'link', 'noscript', 'iframe',
+            'header', 'footer', 'nav', 'aside', 'form', 'button',
+            '[class*="menu"]', '[class*="sidebar"]', '[class*="banner"]',
+            '[class*="advertisement"]', '[class*="copyright"]', '[class*="social"]'
+        ]
+        for tag in soup.select(','.join(noise_tags)):
             tag.decompose()
 
         # 提取主要内容
-        article = soup.find('article')
-        if article:
-            content = extract_content_from_element(article, max_length)
-        else:
-            content = extract_content_from_element(soup.body if soup.body else soup, max_length)
-
-        # 如果提取的内容太短，尝试其他方法
-        if len(content) < 100:
-            content = extract_content_from_element(soup, max_length)
-
-        return clean_text(content)
-
-    except Exception as e:
-        logging.error(f"获取页面内容失败 ({url}): {e}")
-        return "无法获取内容"
-
-def extract_content_from_element(element, max_length=1000):
-    """
-    从HTML元素中提取文本内容，
-    去除重复内容并限制最大长度。
-    针对不同类型的网站采用不同的提取策略。
-    """
-    # 检查是否是360天气网
-    element_str = str(element)
-    if 'tianqi.so.com' in element_str:
-        # 针对360天气网的特殊处理
-        weather_info = []
+        content_parts = []
         
-        # 提取天气预报信息
-        # 首先尝试获取7天天气预报
-        days = element.select('.weather-list .item')
-        if not days:
-            # 如果没有找到,尝试其他可能的选择器
-            days = element.select('.days-item')
-            
-        for day in days:
-            try:
-                # 尝试不同的选择器组合来获取信息
-                date = day.select_one('.date') or day.select_one('.day')
-                weather = day.select_one('.weather') or day.select_one('.wea')
-                temp = day.select_one('.temp') or day.select_one('.temperature')
-                wind = day.select_one('.wind') or day.select_one('.wind-direction')
-                
-                if date and weather and temp:
-                    date_text = date.get_text().strip()
-                    weather_text = weather.get_text().strip()
-                    temp_text = temp.get_text().strip()
-                    wind_text = wind.get_text().strip() if wind else "无风向"
-                    
-                    # 格式化信息
-                    info = f"{date_text} {weather_text} 温度:{temp_text} 风力:{wind_text}"
-                    weather_info.append(info)
-            except Exception as e:
-                logging.error(f"提取天气信息失败: {e}")
+        # 1. 尝试找到主要内容区域
+        main_selectors = [
+            'article', 'main', '[role="main"]', '.main-content', '#content', '#main',
+            '.article', '.post', '.entry', '.blog-post', '.content-main'
+        ]
+        
+        main_content = None
+        for selector in main_selectors:
+            main_content = soup.select_one(selector)
+            if main_content:
+                break
+
+        if not main_content:
+            main_content = soup.body if soup.body else soup
+
+        # 2. 提取标题
+        title = None
+        title_tags = main_content.find_all(['h1', 'h2'], limit=2)
+        for tag in title_tags:
+            if len(tag.get_text(strip=True)) > 10:
+                title = tag.get_text(strip=True)
+                break
+
+        if title:
+            content_parts.append(title)
+
+        # 3. 提取正文内容
+        content_tags = main_content.find_all(['p', 'h2', 'h3', 'h4', 'h5', 'h6', 'li'])
+        
+        for tag in content_tags:
+            text = tag.get_text(strip=True)
+            # 过滤无效内容
+            if not text or len(text) < 20:
+                continue
+            if any(x in text.lower() for x in ['copyright', '版权所有', '关注我们', '扫描二维码']):
+                continue
+            if re.match(r'^[【\[\(（].*[】\]\)）]$', text):  # 跳过纯标签文本
                 continue
                 
-        if weather_info:
-            # 只返回未来几天的天气预报
-            return ' | '.join(weather_info[:7])
-        
-        # 如果上述方法都失败,尝试直接提取snippet中的信息
-        snippet = element.get_text(separator=' ', strip=True)
-        if '明天' in snippet and '℃' in snippet:
-            return snippet
+            # 处理标题标签
+            if tag.name.startswith('h'):
+                content_parts.append(f"\n{text}\n")
+            # 处理列表项
+            elif tag.name == 'li':
+                content_parts.append(f"- {text}")
+            # 处理普通段落
+            else:
+                content_parts.append(text)
 
-    # 如果不是天气网站或无法提取到天气信息,使用默认的提取方法
-    content_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'article', 'section']
-    contents = []
-    for tag in element.find_all(content_tags):
-        text = tag.get_text(separator=' ', strip=True)
-        if text and not text.isspace():
-            contents.append(text)
-    
-    contents = remove_duplicates(contents)
-    text = ' '.join(contents)
-    if len(text) > max_length:
-        text = text[:max_length] + '...'
-    
-    return text
+        # 4. 如果提取的内容太少，尝试其他方法
+        if len('\n'.join(content_parts)) < 200:
+            # 寻找长文本块
+            for tag in main_content.find_all(['div', 'section']):
+                text = tag.get_text(strip=True)
+                if len(text) > 200 and not any(x in text.lower() for x in ['copyright', '版权所有']):
+                    content_parts.append(text)
+                    break
+
+        # 5. 组合并清理最终内容
+        final_text = '\n\n'.join(content_parts)
+        final_text = clean_text(final_text)
+        
+        # 6. 内容有效性检查
+        if not final_text or len(final_text) < 100:
+            return "无法提取有效内容"
+            
+        return final_text
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"网页请求失败 ({url}): {e}")
+        return "网页请求失败"
+    except Exception as e:
+        logging.error(f"内容提取失败 ({url}): {e}")
+        return "内容提取失败"
